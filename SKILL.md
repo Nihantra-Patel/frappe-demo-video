@@ -805,6 +805,16 @@ doesn't exist.
   earlier version only glided/rippled and relied entirely on the later `revealField(anchor)`
   call to perform the actual `.click()`; calling `clickTab(label)` with no anchor, or one that
   turned out hidden, silently left the pane never switching. Fixed — always click here too.)
+  **A second, related bug**: the glide/ripple/click were all nested inside `if (r) { ... }`,
+  where `r` is the tab's measured rect — so if `rectOfTabLabel` returned `null` (confirmed live:
+  right after `submitForm()`'s docstatus flip re-renders the page-head, the tab strip can
+  briefly not have the target tab mounted yet when `clickTab` is called immediately after), the
+  ENTIRE block — including the real `.click()` — was skipped, with nothing to show for it on
+  camera and no error either. Fixed: `clickTab` now waits for the tab to actually be in the
+  strip before measuring, and clicks it UNCONDITIONALLY afterward regardless of whether the
+  cosmetic glide/ripple ran — a missing ripple is a cosmetic gap, a missing click silently
+  breaks every caller downstream of it (this is what made `clickDashboardLink`'s "Connections"
+  tab switch fail with no visible cause while recording a real Loan Disbursement flow).
   `revealField(fn)` does its OWN independent tab-activation too (belt-and-suspenders, not a
   dependency on `clickTab`): it does NOT use `scroll_to_field` (that call also does an instant,
   uncaptured `scrollIntoView` as a side effect — the "scroll is missing" bug this skill exists

@@ -1140,6 +1140,19 @@ async function rectOfTabLabel(lbl) {
   }, lbl);
 }
 async function clickTab(label, anchor) {
+  // Wait for the tab strip to actually contain `label` before measuring —
+  // right after a page-head re-render (e.g. immediately following
+  // submitForm()'s docstatus flip, which swaps out custom buttons AND can
+  // momentarily affect the tab strip too), rectOfTabLabel can return null
+  // for a tab that is about to exist but isn't mounted yet. A real, confirmed
+  // bug: clickTab silently skipped its ENTIRE body (including the actual
+  // .click()) whenever this measurement came back null, exactly the same
+  // class of "ripple with no real action behind it" defect already fixed in
+  // saveForm/submitForm — reads as the video doing nothing when a tab switch
+  // was expected, with no error to explain why.
+  await F().waitForFunction((l) => {
+    return [...document.querySelectorAll(".form-tabs .nav-link")].some((x) => x.innerText.trim().includes(l));
+  }, label, { timeout: 8000 }).catch(() => {});
   const r = await rectOfTabLabel(label);
   if (r) {
     await setCursorType("pointer");
@@ -1151,12 +1164,16 @@ async function clickTab(label, anchor) {
     if (live && (Math.hypot(live.cx - r.cx, live.cy - r.cy) > 4)) await glide(live.cx, live.cy, 160);
     await hoverDwell();
     await ripple(360);
-    await F().evaluate((lbl) => {
-      const t = [...document.querySelectorAll(".form-tabs .nav-link")].find((x) => x.innerText.trim().includes(lbl));
-      t?.click();
-    }, label).catch(() => {});
     await setCursorType("default");
   }
+  // CLICK UNCONDITIONALLY — even if the cosmetic glide/ripple above was
+  // skipped because the tab wasn't measurable in time, still attempt the
+  // real click. A ripple with no click is a cosmetic-only bug; a click that
+  // never fires at all silently breaks every caller downstream of it.
+  await F().evaluate((lbl) => {
+    const t = [...document.querySelectorAll(".form-tabs .nav-link")].find((x) => x.innerText.trim().includes(lbl));
+    t?.click();
+  }, label).catch(() => {});
   if (anchor) await revealField(anchor);
   await hold(320);
 }
