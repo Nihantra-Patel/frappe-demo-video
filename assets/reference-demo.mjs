@@ -1325,7 +1325,18 @@ const dl = (label) => encodeURIComponent(label).replace(/'/g, "%27");
 // Caller must already be ON the document (newDoc()/clickListRow() etc. already
 // leave the frame there). Returns the new tab's Page so the caller can choose
 // to keep rendering from it or close it and fall back to gotoApp("/printview...").
+// Remembers the form URL openPrintView() was called from, so a caller that's
+// done with the print beat can get back to the actual document afterward —
+// a page/tab switch back from the "Full Page" tab does NOT by itself return
+// the main page's app iframe to the form (see the call site's own comment on
+// why: frm.print_doc() already navigated that iframe to the print route
+// BEFORE the new tab even opened). Call F().goto(lastFormUrl, ...) after
+// closing the extra tab if the next step needs to be back on the form (e.g.
+// clicking a page-head custom button) — see "Driving the app (CRITICAL)" in
+// SKILL.md for the fuller writeup of this defect.
+let lastFormUrl = null;
 async function openPrintView() {
+  lastFormUrl = await F().evaluate(() => location.href).catch(() => null);
   // The real button has title="" with the actual tooltip text in
   // data-original-title (Bootstrap tooltip convention — confirmed by
   // inspecting a live site's rendered DOM: `<button ... title=""

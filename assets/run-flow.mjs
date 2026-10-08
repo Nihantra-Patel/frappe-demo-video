@@ -1356,7 +1356,16 @@ const dl = (label) => encodeURIComponent(label).replace(/'/g, "%27");
 // Caller must already be ON the document (newDoc()/clickListRow() etc. already
 // leave the frame there). Returns the new tab's Page so the caller can choose
 // to keep rendering from it or close it and fall back to gotoApp("/printview...").
+// Remembers the form URL openPrintView() was called from, so a caller that's
+// done with the print beat can get back to the actual document afterward —
+// see closeExtraTab's note on why this is needed, not optional.
+let lastFormUrl = null;
 async function openPrintView() {
+  // The form's own page URL BEFORE the print icon navigates the app iframe
+  // away from it (frm.print_doc() does a SAME-TAB SPA route change to the
+  // desk print page — see the comment below) — the one thing a caller needs
+  // to get back to the form later, since nothing else records it.
+  lastFormUrl = await F().evaluate(() => location.href).catch(() => null);
   // The real button has title="" with the actual tooltip text in
   // data-original-title (Bootstrap tooltip convention — confirmed by
   // inspecting a live site's rendered DOM: `<button ... title=""
@@ -1917,9 +1926,27 @@ const STEP_HANDLERS = {
     const newTab = await openPrintView();
     if (newTab) { extraTabs.push(newTab); await switchToTab(newTab); }
   },
+  // Closing the "Full Page" tab leaves the MAIN page's app iframe still on
+  // whatever route openPrintView()'s own print-icon click navigated it
+  // to (frm.print_doc() does a same-tab SPA route change to the desk print
+  // page BEFORE the new tab even opens) — not back on the document form.
+  // A caller that then tries a form-only action (clickGroupItem, saveForm,
+  // etc.) right after closeExtraTab was hitting "button group not found"
+  // because of exactly this: the iframe was still showing the print page,
+  // which obviously has no page-head custom buttons. Confirmed as a real
+  // bug, not a hypothetical one, while recording a real flow. Navigate back
+  // to openPrintView()'s remembered pre-navigation URL so the caller lands
+  // on the actual form again, same as closing a real browser tab and
+  // clicking back on the one still open behind it.
   async closeExtraTab() {
     const t = extraTabs.pop();
     if (t) { await t.close().catch(() => {}); await switchToTab(mainPage); }
+    if (lastFormUrl) {
+      await F().goto(lastFormUrl, { waitUntil: "domcontentloaded" });
+      await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 }).catch(() => {});
+      await hold(500);
+      lastFormUrl = null;
+    }
   },
   async maskSelectors(sels) { await maskSelectors(Array.isArray(sels) ? sels : [sels]); },
   async unmaskSelectors(sels) { await unmaskSelectors(Array.isArray(sels) ? sels : [sels]); },

@@ -662,6 +662,29 @@ doesn't exist.
   earlier version, not paired with closing the old tab — leaving an orphaned page that no
   longer receives captures but still exists in the context. Close the old tab once you're
   done with it unless the storyboard genuinely needs to switch back to it later.
+- **`F()` must fall back to the page itself when there's no "app" iframe.** `F = () =>
+  page.frame("app")` is correct for the stage page, but a tab opened via `openPrintView()`'s
+  "Full Page" button is a bare standalone page — no stage shell, no "app" iframe at all —
+  so `page.frame("app")` there returns `null`, and every primitive's `F().evaluate(...)`
+  call throws `Cannot read properties of null`. Confirmed as a real bug (not hypothetical)
+  while recording a real flow: the render crashed on the very next step after the new tab
+  opened successfully. Fixed: `F = () => page.frame("app") || page`.
+- **Closing the "Full Page" tab does NOT by itself return the main page to the document
+  form — the next form-only action can fail with no obvious reason why.** `frm.print_doc()`
+  (the print ICON's own click handler) already does a same-tab SPA route change to the desk
+  print page BEFORE the "Full Page" button even opens a new tab — so switching `page` back
+  to the main tab after closing the extra one leaves its app iframe still showing the PRINT
+  route, not the form. A caller that then calls `clickGroupItem`/`clickCustomButton`/
+  `saveForm` etc. right after closing the tab hits "button group not found" (or similar) for
+  a reason that has nothing to do with the button itself — the iframe is just on the wrong
+  page. Confirmed as a real failure while recording a real Loan demo (a "Create" button
+  group genuinely exists on a submitted Loan, verified directly, but the step failed anyway
+  immediately after a print-preview beat). Fixed generically: `openPrintView()` now records
+  the form's URL (`lastFormUrl`) before navigating away from it, and `run-flow.mjs`'s
+  `closeExtraTab` step navigates the app iframe back there after closing the tab and
+  switching back. If you're hand-writing `run()` in a copied `reference-demo.mjs` instead of
+  using `run-flow.mjs`, do the equivalent yourself: capture the form URL before calling
+  `openPrintView()`, and `F().goto(that URL, ...)` after you're done with the new tab.
 
 ### Frappe specifics
 - **Checkboxes:** `cur_frm.set_value(fieldname, 1)` — a native `input.click()` does NOT
