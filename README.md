@@ -1,6 +1,6 @@
 # frappe-demo-video
 
-A Claude Code skill that produces a polished, Screen-Studio-style demo video of a
+A skill that produces a polished, Screen-Studio-style demo video of a
 Frappe/ERPNext/HRMS feature — app in a rounded window on a desktop wallpaper, glide cursor,
 click ripples — by driving the real app headlessly and rendering it **frame by frame**.
 
@@ -21,7 +21,7 @@ cleanly from before-state to after-state. 60fps out, zero interpolation.
 unzip -d ~/.claude/skills/ frappe-demo-video-skill.zip
 ```
 
-That's it — Claude Code picks the skill up from `~/.claude/skills/frappe-demo-video/`.
+That's it — the skill is picked up from `~/.claude/skills/frappe-demo-video/`.
 For a project-local install, use `<repo>/.claude/skills/` instead. Then just ask:
 
 > make a demo video of <feature> in <app>
