@@ -1,4 +1,7 @@
-// India Payroll feature demo — fully automated, DETERMINISTIC frame renderer.
+// Generic Frappe/ERPNext feature demo — fully automated, DETERMINISTIC frame renderer.
+// Works for ANY doctype/module/app built on Frappe — nothing in this harness is
+// specific to one feature; only run()'s own storyboard (and the placeholder
+// constants below) should ever be edited for a particular demo.
 //
 // Screen-Studio style: the Frappe app runs inside a rounded window on a desktop
 // wallpaper, with a glide cursor and click ripples. Unlike a real-time screen
@@ -20,9 +23,12 @@
 // Output: frames/%06d.png (2560×1600 retina). make-video.sh encodes them to mp4 at
 // a constant 60fps. Usage: node reference-demo.mjs
 //
-// This is a WORKED EXAMPLE (India Payroll flow). Copy it and edit only run() for a
-// new feature — the harness (stage, cursor, capture, actions, boot, auth) is
-// reusable as-is. The IDs below (EMP_ID, STRUCTURE, COMPANY) are demo-data examples.
+// This file is a WORKED EXAMPLE SHAPE, not a specific feature — prefer
+// assets/run-flow.mjs for a new video (a plain JSON step list, no .mjs
+// editing at all; see SKILL.md). Copy this file and edit only run() and the
+// placeholder constants below ONLY when a flow genuinely needs custom JS
+// logic run-flow.mjs's step list can't express — the harness (stage, cursor,
+// capture, actions, boot, auth) is reusable as-is, for any doctype/module/app.
 
 import { chromium, request } from "playwright";
 import { execFileSync } from "child_process";
@@ -37,6 +43,10 @@ const FRAME_DIR = path.join(OUT_DIR, "frames");
 // Connection — override via env for your own bench/site. Defaults are placeholders;
 // set a known admin password first: `bench --site <site> set-admin-password <pwd>`.
 const BASE = process.env.DEMO_URL || "http://mysite.localhost:8000";
+// Window titlebar text (the stage's cosmetic "app name" shown in the fake
+// traffic-light bar) — override per-recording via env; generic by default so
+// nothing here reads as built for one specific app/module.
+const WINDOW_TITLE = process.env.DEMO_TITLE || "Frappe";
 const USER = process.env.DEMO_USER || "Administrator";
 const PASS = process.env.DEMO_PASS || "changeme";
 const BENCH = process.env.BENCH || `${process.env.HOME}/frappe-bench`;
@@ -52,8 +62,10 @@ const VIEW = { width: 1600, height: 900 }; // CSS viewport; captured at 2× → 
 const SCALE = 2; // retina capture scale (Page.captureScreenshot clip.scale)
 const FPS = 60;
 const STEP = 1000 / FPS;
-const EMP_ID = "HR-EMP-00001"; // Aarav Sharma
-const STRUCTURE = "India Payroll Demo Structure";
+// Demo-data placeholders for run()'s storyboard below — replace with the real
+// names for whatever feature you're recording. Nothing in this harness reads
+// these except run() itself.
+const REFERENCE_NAME = "<name of the Step-2 reference document>";
 const COMPANY = "_Test Company";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -85,7 +97,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:-appl
 </style></head><body>
 <div id="wall"></div>
 <div id="win">
- <div id="bar"><span class="d rr"></span><span class="d yy"></span><span class="d gg"></span><span class="t">Frappe HR — India Payroll</span></div>
+ <div id="bar"><span class="d rr"></span><span class="d yy"></span><span class="d gg"></span><span class="t">${WINDOW_TITLE}</span></div>
  <iframe id="app" name="app" src="about:blank"></iframe>
 </div>
 <div id="caption"></div>
@@ -1710,88 +1722,84 @@ async function scrollReportBody(downPx = 900, durMs = 900) {
 
 // ===================================================================== flow
 // NOTE: the site is reset to a clean pre-demo state by reset-demo.py (run by
-// make-video.sh BEFORE this script). Client-side cancel/delete
-// can't remove submitted slips with linked ledger entries, so the reset is
+// make-video.sh BEFORE this script). Client-side cancel/delete can't remove
+// a submitted document with linked ledger/stock entries, so the reset is
 // done server-side via bench python.
+//
+// This storyboard is intentionally GENERIC — replace every "<...>" placeholder
+// (doctype names, fieldnames, values, report names) with the real ones for
+// whatever feature you're recording. The SHAPE below (a settings-style
+// single doctype → a reference/read-only doctype → a create+submit flow that
+// feeds a second create+submit flow → one or more reports) is a common one,
+// not a required one — delete/reorder/add steps freely; nothing here is
+// specific to any one module or app.
 async function run() {
   for (let i = 0; i < 50 && !F(); i++) await sleep(250);
   await sleep(400);
 
-  // ---------- Step 1: Payroll Settings ----------
-  await gotoApp("/app/payroll-settings");
-  await waitForm("Payroll Settings");
+  // ---------- Step 1: a single/settings-style doctype ----------
+  await gotoApp("/app/<settings-doctype-slug>");
+  await waitForm("<Settings Doctype>");
   await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 });
   await hold(900);
-  await clickTab("India Payroll", "enable_professional_tax");
+  await clickTab("<Tab Label>", "<first_fieldname_on_that_tab>");
   await hold(500);
 
-  await toggleCheck("enable_professional_tax");
-  await toggleCheck("enable_esic");
-  await revealField("esic_registration_number");
+  await toggleCheck("<enable_fieldname>");
+  await revealField("<dependent_fieldname>");
   await hold(300);
-  await setField("esic_registration_number", "31000123450001001");
+  await setField("<dependent_fieldname>", "<value>");
   await hold(400);
-  await hold(260);
-  await toggleCheck("enable_lwf");
 
   await saveForm();
   await hold(700);
 
-  // ---------- Step 2: Salary Structure ----------
-  await gotoApp("/app/salary-structure/" + encodeURIComponent(STRUCTURE));
-  await waitForm("Salary Structure");
+  // ---------- Step 2: a reference/read-only doctype the next step depends on ----------
+  await gotoApp("/app/<reference-doctype-slug>/" + encodeURIComponent(REFERENCE_NAME));
+  await waitForm("<Reference Doctype>");
   await hold(600);
-  await clickTab("Earnings & Deductions", "earnings");
-  await scrollToSel('[data-fieldname="earnings"]', 650);
-  await glideToSel('[data-fieldname="earnings"]', 0.3, 0.4, 500);
-  await holdIdle(2000); // dwelling on the breakdown table, nothing to click next
+  await clickTab("<Tab Label>", "<fieldname>");
+  await scrollToSel('[data-fieldname="<fieldname>"]', 650);
+  await glideToSel('[data-fieldname="<fieldname>"]', 0.3, 0.4, 500);
+  await holdIdle(2000); // dwelling on the detail, nothing to click next
 
-  // ---------- Step 3: Salary Structure Assignment ----------
-  await newDoc("Salary Structure Assignment");
+  // ---------- Step 3: create + submit a document that links to Step 2 ----------
+  await newDoc("<First Doctype>");
   await hold(500);
   await setField("company", COMPANY);
-  await setField("employee", EMP_ID);
-  await setField("salary_structure", STRUCTURE);
-  await setField("from_date", "2024-01-01");
-  await setField("base", 18000);
+  await setField("<link_fieldname>", REFERENCE_NAME);
+  await setField("<date_fieldname>", "2024-01-01");
+  await setField("<amount_fieldname>", 18000);
   await hold(500);
-  await clickTab("India Payroll", "employment_state");
-  await setField("employment_state", "Maharashtra");
+  await clickTab("<Tab Label>", "<fieldname>");
+  await setField("<fieldname>", "<value>");
   await hold(700);
-  await hold(400);
   await submitForm();
   await hold(800);
 
-  // ---------- Step 4: Salary Slip ----------
-  await newDoc("Salary Slip");
+  // ---------- Step 4: create + submit a document that depends on Step 3 ----------
+  await newDoc("<Second Doctype>");
   await hold(500);
-  await setField("employee", EMP_ID);
+  await setField("<link_fieldname>", REFERENCE_NAME);
   await setField("posting_date", "2026-06-30");
-  await setField("start_date", "2026-06-01");
-  await setField("end_date", "2026-06-30");
-  await setField("salary_structure", STRUCTURE);
+  await setField("<start_date_fieldname>", "2026-06-01");
+  await setField("<end_date_fieldname>", "2026-06-30");
   await saveForm();
   await hold(600);
 
-  await clickTab("Earnings & Deductions", "deductions");
-  await scrollToSel('[data-fieldname="deductions"]', 650);
-  await glideToSel('[data-fieldname="deductions"]', 0.3, 0.4, 500);
+  await clickTab("<Tab Label>", "<fieldname>");
+  await scrollToSel('[data-fieldname="<fieldname>"]', 650);
+  await glideToSel('[data-fieldname="<fieldname>"]', 0.3, 0.4, 500);
   await holdIdle(2800);
   await submitForm();
   await hold(900);
 
-  // ---------- Step 5: Reports ----------
-  await gotoApp("/app/query-report/ESIC Register");
-  await runReport("ESIC Register", { company: COMPANY, year: "2026", month: "June" });
+  // ---------- Step 5: report(s) showing the effect of Steps 3-4 ----------
+  await gotoApp("/app/query-report/<Report Name>");
+  await runReport("<Report Name>", { company: COMPANY, year: "2026", month: "June" });
   await holdIdle(1200);
   await scrollReportBody(900); // reveal rows below the fold instead of a static hold
   await holdIdle(1400);
-
-  await gotoApp("/app/query-report/LWF Register");
-  await runReport("LWF Register", { company: COMPANY, year: "2026", month: "June" });
-  await holdIdle(1200);
-  await scrollReportBody(900);
-  await holdIdle(1600);
 }
 
 // ======================================================================= boot

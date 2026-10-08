@@ -677,10 +677,13 @@ doesn't exist.
   that genuinely isn't shown) is skipped rather than aimed at 0,0.
 - **Custom buttons** render into `.custom-actions` with a **URI-encoded `data-label`**, so
   address them by attribute rather than matching text:
-  `.custom-actions [data-label="Fetch%20from%20Payroll"]`. A grouped button is
-  `.inner-group-button[data-label="File%20Return"] > button`, its items
-  `... a[data-label="1.%20Validate"]`. Click the group button first — the menu's items have
-  no measurable rect until it is open, so dwell on the open menu, then glide to the item.
+  `.custom-actions [data-label="<Button%20Label>"]`. A grouped button is
+  `.inner-group-button[data-label="<Group%20Label>"] > button`, its items
+  `... a[data-label="<Item%20Label>"]` — but see "Robustness primitives"' note on
+  `clickGroupItem`: the hidden backing store carries this `data-label`, while the actually
+  rendered, clickable `.es-menu` panel does not (verified live) — match its rows by text
+  instead. Click the group button first — the menu's items have no measurable rect until it
+  is open, so dwell on the open menu, then glide to the item.
 - **Read-only Attach fields** render no control at all while empty, so a file cannot be put
   there from the UI — attach it server-side off-camera if the flow needs one.
 - **Fields:** `await cur_frm.set_value(fn, val)` (works for link/date/data/currency).

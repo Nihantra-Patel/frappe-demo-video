@@ -43,15 +43,17 @@ of rendering them if your flow opens an attachment.
 | File | What it is |
 |---|---|
 | `SKILL.md` | The method and the hard-won rules. Read this first — every rule in it was paid for in debugging |
-| `assets/reference-demo.mjs` | The storyboard + reusable harness (stage, cursor, capture, form actions). Copy it and edit only `run()` |
+| `assets/run-flow.mjs` | **The recommended way to make a new video.** A generic runner: describe the flow as a plain JSON step list (`steps.json`) and it replays that list using the same deterministic harness — no `.mjs` file to write or edit at all |
+| `assets/reference-demo.mjs` | The harness (stage, cursor, capture, form actions) plus a worked-example `run()` shape. Copy it and edit only `run()` ONLY for a flow that genuinely needs custom JS a plain step list can't express |
 | `assets/get-schema.py` | Lookup tool: prints a doctype's fields/types/mandatory status via `frappe.get_meta()`, so you don't read the raw doctype `.json` by hand. A planning aid, not an auto-storyboard generator — see SKILL.md's "Doctype schema lookup" section for why |
-| `assets/reset-demo.py` | Server-side reset to a clean pre-demo state, run before every take |
-| `assets/make-video.sh` | reset → render → encode to a constant-60fps MP4 |
+| `assets/reset-demo.py` | Worked-example server-side reset for the `reference-demo.mjs` path. Not needed with `run-flow.mjs` — it resets generically via `--reset-only`, tracking whatever each run actually created |
+| `assets/make-video.sh` | reset → render → encode to a constant-60fps MP4. Picks `run-flow.mjs` + a `steps.json` automatically if present; pass `SCRIPT=<file>.mjs` to use a bespoke storyboard instead |
 
-The included storyboard is a worked example against an India Payroll flow. The harness above
-`run()` is feature-agnostic — that's the part you keep.
+Everything here is generic — no file is specific to one doctype, module, or app. Any example
+doctype/field names you see (in `reference-demo.mjs`'s `run()` or `reset-demo.py`) are
+placeholders (`<Doctype>`, `<fieldname>`) meant to be replaced, not a real feature.
 
-## First run
+## First run — the generic path (recommended)
 
 1. Copy `assets/` next to wherever you want the output, and point it at your bench:
 
@@ -61,24 +63,61 @@ The included storyboard is a worked example against an India Payroll flow. The h
    export DEMO_PASS=<password>          # bench --site <site> set-admin-password …
    export BENCH=$HOME/frappe-bench
    export DEMO_SITE=<site>
+   export DEMO_TITLE="<App Name>"       # optional — the cosmetic window titlebar text
    ```
 
-2. Edit the demo-data constants at the top of `reference-demo.mjs` (`EMP_ID`, `STRUCTURE`,
-   `COMPANY`) and the doctypes `reset-demo.py` clears, to match your site.
-
-   Don't know the target doctype's fields offhand? `DEMO_SITE=<site> bench/env/bin/python
+2. Don't know the target doctype's fields offhand? `DEMO_SITE=<site> bench/env/bin/python
    assets/get-schema.py <doctype>` prints every field's name/type/mandatory status in one
-   shot — a lookup to inform the storyboard you write by hand, not something that writes it
-   for you (see SKILL.md if you're tempted to wire it into an auto-generator).
+   shot — a lookup to inform the flow you describe, not something that writes it for you
+   (see SKILL.md if you're tempted to wire it into an auto-generator).
 
-3. Rewrite `run()` as your storyboard, using the harness verbs:
+3. Write `steps.json` — an ordered list of `{action: input}` steps, one per beat of the flow,
+   using the harness's own verbs. Nothing is required or assumed; only include what the flow
+   actually needs:
+
+   ```json
+   [
+     {"newDoc": "<Doctype>"},
+     {"setField": {"<fieldname>": "<value>"}},
+     {"saveForm": true},
+     {"openPrintView": true},
+     {"closeExtraTab": true},
+     {"backToListView": true}
+   ]
+   ```
+
+   The opening beat (Home → real navbar search → the doctype's list) happens automatically the
+   first time a flow visits a doctype — you don't write it yourself. A later step can reference
+   an earlier one's generated document name with `"{{Doctype.N}}"` (the Nth document of that
+   doctype created so far). See `run-flow.mjs`'s own header comment for the full list of
+   actions and their exact input shape (`setFrappeLinkField`, `ensureGridRow`, `clickTab`,
+   `switchListView`, `toggleListFilter`, `runReport`, `maskSelectors`, and more).
+
+4. Render:
+
+   ```bash
+   STEPS=steps.json ./make-video.sh      # reset + render + encode
+   SKIP_RESET=1 ./make-video.sh          # keep current data
+   SKIP_RENDER=1 ./make-video.sh         # re-encode existing frames
+   BLUR=1 ./make-video.sh                # light motion blur
+   ```
+
+Output is `demo.mp4` (2560×1600, 60fps) plus the raw frames in `output/frames/`. Every document
+the run creates is tracked in `output/created-docs.json` and deleted generically before the
+next take — no reset script to hand-write for this path.
+
+## When you still need a hand-written `.mjs` storyboard
+
+Only for a flow that genuinely needs custom JS logic a plain step list can't express —
+conditional branching on a value read mid-flow, a loop over a dynamic list, or a bespoke
+off-camera `bench()` step wired into the storyboard's own timing. For that case:
+
+1. Copy `reference-demo.mjs` and rewrite `run()` as your storyboard, using the same harness
+   verbs `run-flow.mjs`'s steps map onto:
 
    ```js
-   await gotoApp("/app/payroll-settings");
-   await waitForm("Payroll Settings");
-   await clickTab("India Payroll", "enable_esic");
-   await toggleCheck("enable_esic");
-   await setField("esic_registration_number", "31000123450001001");
+   await newDoc("<Doctype>");
+   await setField("<fieldname>", "<value>");
    await saveForm();
    await hold(1200);           // dwell on the settled state
    ```
@@ -90,22 +129,14 @@ The included storyboard is a worked example against an India Payroll flow. The h
    Other verbs worth knowing:
 
    ```js
-   await scrollToSel('[data-fieldname="earnings"]', 650);  // captured scroll, not a jump
-   await scrollReportBody(900);                             // scroll a report's result table
+   await scrollToSel('[data-fieldname="<fieldname>"]', 650);  // captured scroll, not a jump
+   await scrollReportBody(900);                                // scroll a report's result table
    await holdIdle(1800);          // dwell with the cursor faded out (no click coming next)
    await maskSelectors([".client-email", ".ssn"]);  // blur sensitive data in every frame
    ```
 
-4. Render:
-
-   ```bash
-   ./make-video.sh                 # reset + render + encode
-   SKIP_RESET=1 ./make-video.sh    # keep current data
-   SKIP_RENDER=1 ./make-video.sh   # re-encode existing frames
-   BLUR=1 ./make-video.sh          # light motion blur
-   ```
-
-Output is `demo.mp4` (2560×1600, 60fps) plus the raw frames in `output/frames/`.
+2. Write/adapt `reset-demo.py` (replace its `<Doctype>`/`<fieldname>` placeholders) and run
+   `SCRIPT=your-script.mjs ./make-video.sh`.
 
 ## Two things that will save you an hour
 

@@ -68,6 +68,10 @@ const RESET_ONLY = process.argv.includes("--reset-only");
 // Connection — override via env for your own bench/site. Defaults are placeholders;
 // set a known admin password first: `bench --site <site> set-admin-password <pwd>`.
 const BASE = process.env.DEMO_URL || "http://mysite.localhost:8000";
+// Window titlebar text (the stage's cosmetic "app name" shown in the fake
+// traffic-light bar) — override per-recording via env; generic by default so
+// nothing here reads as built for one specific app/module.
+const WINDOW_TITLE = process.env.DEMO_TITLE || "Frappe";
 const USER = process.env.DEMO_USER || "Administrator";
 const PASS = process.env.DEMO_PASS || "changeme";
 const BENCH = process.env.BENCH || `${process.env.HOME}/frappe-bench`;
@@ -113,7 +117,7 @@ html,body{margin:0;height:100%;overflow:hidden;background:#000;font-family:-appl
 </style></head><body>
 <div id="wall"></div>
 <div id="win">
- <div id="bar"><span class="d rr"></span><span class="d yy"></span><span class="d gg"></span><span class="t">Frappe HR — India Payroll</span></div>
+ <div id="bar"><span class="d rr"></span><span class="d yy"></span><span class="d gg"></span><span class="t">${WINDOW_TITLE}</span></div>
  <iframe id="app" name="app" src="about:blank"></iframe>
 </div>
 <div id="caption"></div>
