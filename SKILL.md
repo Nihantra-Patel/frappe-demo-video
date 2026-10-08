@@ -592,6 +592,22 @@ doesn't exist.
   first. `clickDashboardLink` resolves this itself (picks the last visible match, tags it, and
   clicks that exact element rather than re-resolving the selector) — don't "fix" it back to a
   first-match lookup; that's the regression this fix exists to prevent.
+- **A DEEPER version of the same hazard, found debugging the above and still open**: after a
+  route change from one document to a DIFFERENT doctype's document (e.g. `clickGroupItem`'s
+  `make_loan_disbursement` trigger doing `frappe.set_route("Form", "Loan Disbursement", name)`
+  from a Loan), the PREVIOUS document's tab-pane DOM can still be present and marked `active`/
+  `show` in the exact same page, alongside the new document's own tab panes — confirmed directly:
+  a zero-size `.document-link` was found inside `#loan-connections_tab` (the OLD Loan's pane,
+  still `inActivePane: true`) coexisting with the real, current `#loan-disbursement-
+  connections_tab` (correctly containing the new, live link, but `inActivePane: false`). This is
+  a genuine Frappe SPA state issue when a route change crosses doctypes right after a save+submit
+  reload sequence — not a selector bug `rectOf`/`clickDashboardLink` can fully paper over, because
+  BOTH candidates were zero-size at the moment measured (the real one hadn't become visible/active
+  yet). **Until this is root-caused further, prefer `searchAndOpenDoctype` + `clearListFilters()`
+  over `clickDashboardLink` for a navigation that immediately follows a cross-doctype route change
+  coming off a save+submit sequence** — it's the proven-reliable path. `clickDashboardLink` remains
+  correct and recommended for the more common case (navigating from an already-settled, already-
+  submitted document that didn't just get routed-to moments earlier).
 - **`newDoc()`'s step handler used to skip the real "+ Add <Doctype>" button after landing on a
   list — a real, confirmed bug caught only by watching a render.** The automatic opening beat
   (Home → search → land on the doctype's list, documented above) correctly showed the list with
