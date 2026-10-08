@@ -194,7 +194,19 @@ const INIT = `
 `;
 
 let page, cdp;
-const F = () => page.frame("app");
+// F() returns the thing every primitive's actions/measurements run against.
+// On the STAGE page this is the app iframe ("app"); but a tab opened via
+// openPrintView()'s "Full Page" button (or any other real new-tab
+// navigation) is a bare standalone page with NO stage shell and NO "app"
+// iframe at all — page.frame("app") there returns null, and every primitive
+// built on F().evaluate(...) throws "Cannot read properties of null".
+// Confirmed as a real, not hypothetical, bug: a render failed exactly this
+// way immediately after openPrintView()'s new tab opened successfully.
+// Falling back to the page itself when no "app" frame exists makes every
+// existing primitive work unchanged on a plain page, not just inside the
+// stage's iframe — it only matters that F() is a real page/frame runners can
+// call .evaluate()/.waitForFunction() on.
+const F = () => page.frame("app") || page;
 
 // ---------------------------------------------------------- frame capture
 let FRAME = 0;
