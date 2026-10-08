@@ -1364,13 +1364,19 @@ async function openPrintView() {
   await F().waitForFunction(() => document.querySelector(".print-preview, .print-format"), null, { timeout: 15000 }).catch(() => {});
   await hold(500);
 
-  const FULL_PAGE_SEL = '.print-preview-wrapper .btn:has-text("Full Page"), [data-original-title="Full Page"]';
-  // :has-text is a Playwright-only selector extension — not valid in a bare
-  // querySelector, so resolve the button by its visible text from inside the
-  // page instead of relying on that pseudo-class working in F().evaluate().
+  // Verified directly against a live site's rendered DOM: the desk print
+  // page's toolbar (Full Page / PDF / Refresh / Print) is the same espresso
+  // (es-*) component used everywhere else in the current desk, NOT Bootstrap
+  // `.btn` — the real markup is `<button class="es-button ellipsis">Full
+  // Page</button>` with no `.print-preview-wrapper`/`.btn` ancestor at all.
+  // A `.print-preview-wrapper .btn` selector (the old version here) matches
+  // NOTHING on a real site — this was a real, confirmed bug (caught because
+  // a render failed with "Full Page button not found" even though the
+  // button was plainly visible in the captured frame), not a hypothetical
+  // one. Match by visible text across every `.es-button` instead.
   const fullPageRect = await F().evaluate(() => {
-    const btn = [...document.querySelectorAll(".print-preview-wrapper .btn, .page-head .btn")]
-      .find((b) => b.textContent.trim().toLowerCase().includes("full page"));
+    const btn = [...document.querySelectorAll(".es-button")]
+      .find((b) => b.textContent.trim().toLowerCase() === "full page");
     if (!btn) return null;
     const b = btn.getBoundingClientRect();
     btn.setAttribute("data-demo-full-page", "1");

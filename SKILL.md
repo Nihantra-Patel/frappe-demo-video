@@ -521,7 +521,16 @@ doesn't exist.
   check caught a real selector bug**: the button's actual `title` attribute is EMPTY
   (`title=""`) with the real tooltip text in `data-original-title="Print"` (Bootstrap tooltip
   convention) — a `[title="Print"]` fallback selector matches nothing on a real site. Fixed to
-  match `[data-original-title="Print"]` instead. Lands on
+  match `[data-original-title="Print"]` instead. **A second live-DOM bug was caught the same
+  way**: the "Full Page" button lookup used `.print-preview-wrapper .btn`/`.page-head .btn`
+  (Bootstrap-style), but the desk print page's whole toolbar (Full Page / PDF / Refresh /
+  Print) is actually the same espresso (`es-*`) component used everywhere else in the current
+  desk — the real markup is `<button class="es-button ellipsis">Full Page</button>` with no
+  `.btn`/`.print-preview-wrapper` ancestor at all. The old selector matched nothing, which
+  surfaced as a render failing with `"Full Page" button not found` even though the button was
+  plainly visible in the captured frame right before the failure — confirmed by rendering a
+  real flow against a live site, not by reading source. Fixed to match any `.es-button` whose
+  text is exactly "Full Page". Lands on
   the desk print page, then glides to and clicks its real **"Full Page"** button, which opens
   `/printview?...` in a genuinely NEW tab (caught via `context.waitForEvent("page")`). Returns
   that new `Page` so the caller can keep rendering frames from it or close it. This replaces
