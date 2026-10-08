@@ -1943,7 +1943,21 @@ const STEP_HANDLERS = {
     if (t) { await t.close().catch(() => {}); await switchToTab(mainPage); }
     if (lastFormUrl) {
       await F().goto(lastFormUrl, { waitUntil: "domcontentloaded" });
-      await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 }).catch(() => {});
+      // `frappe.boot` existing only proves the Frappe APP FRAMEWORK loaded —
+      // it's true almost immediately, long before `cur_frm` is bound and the
+      // form's own DOM (`.form-layout`) has actually rendered. Waiting on
+      // just `frappe.boot` (the old version here) let the NEXT step
+      // (typically clickGroupItem/saveForm) measure a still-blank page and
+      // fail with "button group not found" — a real, confirmed bug: the
+      // captured frame right before that failure was genuinely blank white,
+      // not a selector problem. Every other form-landing primitive
+      // (newDoc/gotoApp's callers) waits on the real signal — `cur_frm`
+      // bound AND `.form-layout` present — via waitForm(); do the same here
+      // instead of a weaker ad hoc check.
+      await F().waitForFunction(
+        () => window.cur_frm && cur_frm.doc && document.querySelector(".form-layout"),
+        null, { timeout: 25000 }
+      ).catch(() => {});
       await hold(500);
       lastFormUrl = null;
     }

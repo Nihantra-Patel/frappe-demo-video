@@ -685,6 +685,20 @@ doesn't exist.
   switching back. If you're hand-writing `run()` in a copied `reference-demo.mjs` instead of
   using `run-flow.mjs`, do the equivalent yourself: capture the form URL before calling
   `openPrintView()`, and `F().goto(that URL, ...)` after you're done with the new tab.
+- **Waiting on just `window.frappe && frappe.boot` after that `goto` is NOT enough — it
+  resolves long before the form itself has actually rendered.** `frappe.boot` existing only
+  proves the Frappe app FRAMEWORK loaded; `cur_frm` being bound and the form's own DOM
+  (`.form-layout`) existing is the real readiness signal, which is exactly what `waitForm()`
+  already checks for every other form-landing primitive. The first version of the
+  `closeExtraTab` fix above used the weaker `frappe.boot` check and still failed — the very
+  next step (`clickGroupItem`) measured a still-blank page and failed with "button group not
+  found" again, for a second, DIFFERENT reason than the one just fixed. Confirmed directly:
+  the frame captured right before that second failure was genuinely blank white on screen,
+  not a selector problem. Fixed by waiting on `cur_frm && cur_frm.doc &&
+  document.querySelector(".form-layout")` instead — the same condition `waitForm()` uses.
+  **Lesson for any new code that navigates `F()` and then needs the destination to be a
+  ready Frappe FORM (not just a loaded Frappe app)**: always wait on this real signal, never
+  on `frappe.boot` alone — it is a necessary but nowhere-near-sufficient condition.
 
 ### Frappe specifics
 - **Checkboxes:** `cur_frm.set_value(fieldname, 1)` — a native `input.click()` does NOT

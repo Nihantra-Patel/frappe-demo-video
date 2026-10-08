@@ -1330,10 +1330,19 @@ const dl = (label) => encodeURIComponent(label).replace(/'/g, "%27");
 // a page/tab switch back from the "Full Page" tab does NOT by itself return
 // the main page's app iframe to the form (see the call site's own comment on
 // why: frm.print_doc() already navigated that iframe to the print route
-// BEFORE the new tab even opened). Call F().goto(lastFormUrl, ...) after
-// closing the extra tab if the next step needs to be back on the form (e.g.
-// clicking a page-head custom button) — see "Driving the app (CRITICAL)" in
-// SKILL.md for the fuller writeup of this defect.
+// BEFORE the new tab even opened). After closing the extra tab, if the next
+// step needs to be back on the form (e.g. clicking a page-head custom
+// button), do: `await F().goto(lastFormUrl, {waitUntil:"domcontentloaded"});
+// await F().waitForFunction(() => window.cur_frm && cur_frm.doc &&
+// document.querySelector(".form-layout"));` — NOT just `frappe.boot`.
+// `frappe.boot` existing only proves the Frappe app framework loaded; it's
+// true almost immediately, long before `cur_frm` is bound and the form's own
+// DOM (`.form-layout`) has actually rendered. Confirmed as a real bug (not
+// hypothetical): using the weaker `frappe.boot` check let the NEXT action
+// measure a still-blank page and fail for a reason unrelated to its own
+// selector — the captured frame right before that failure was genuinely
+// blank white. See "Driving the app (CRITICAL)" in SKILL.md for the fuller
+// writeup of this defect.
 let lastFormUrl = null;
 async function openPrintView() {
   lastFormUrl = await F().evaluate(() => location.href).catch(() => null);
