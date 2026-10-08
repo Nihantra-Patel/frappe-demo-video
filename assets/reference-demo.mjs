@@ -373,11 +373,46 @@ async function fadeCursorIn(durMs = 200) {
 
 async function rectOf(sel) {
   return F().evaluate((s) => {
-    const el = document.querySelector(s);
-    if (!el) return null;
-    const r = el.getBoundingClientRect();
-    if (!r.width && !r.height) return null; // hidden (e.g. a collapsed section's field)
-    return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+    // Multiple elements can match the SAME selector at once — confirmed as a
+    // real, not hypothetical, cause of a real failure: after a search-driven
+    // list navigation, TWO `.page-head .primary-action` buttons existed
+    // simultaneously (one a hidden leftover from the previous screen's
+    // toolbar, `class="... primary-action hide"`, the other the real,
+    // visible "Add Loan" button). `document.querySelector` always returns
+    // the FIRST match in document order regardless of visibility — if that
+    // happens to be the hidden leftover, this returned null (correctly
+    // treating a zero-size element as "not there"), which made a perfectly
+    // real, on-screen button look missing. Scan ALL matches and return the
+    // first one that's actually visible, instead of only ever checking the
+    // first match found.
+    const candidates = document.querySelectorAll(s);
+    for (const el of candidates) {
+      const r = el.getBoundingClientRect();
+      if (r.width || r.height) {
+        return { x: r.left, y: r.top, w: r.width, h: r.height, cx: r.left + r.width / 2, cy: r.top + r.height / 2 };
+      }
+    }
+    return null; // every match was hidden (e.g. a collapsed section's field), or there were none
+  }, sel);
+}
+// Clicks the first VISIBLE element matching `sel` — not just the first
+// match in document order. Use this (not a bare
+// `document.querySelector(sel)?.click()` inline in F().evaluate) for every
+// click-driving primitive, for the same reason `rectOf` above scans all
+// matches: a hidden leftover element from a previous screen's toolbar can
+// share the exact same selector as the real, visible target (confirmed on
+// `.page-head .primary-action` after a search-driven list navigation), and
+// a plain querySelector().click() has no visibility check at all — it would
+// silently click the WRONG, invisible element instead of throwing the clear
+// "not found" error `rectOf`-based primitives get from this same hazard.
+async function clickVisible(sel) {
+  return F().evaluate((s) => {
+    const candidates = document.querySelectorAll(s);
+    for (const el of candidates) {
+      const r = el.getBoundingClientRect();
+      if (r.width || r.height) { el.click(); return true; }
+    }
+    return false;
   }, sel);
 }
 // Resolves a working `[data-fieldname="..."]` selector for a field even when
@@ -751,16 +786,20 @@ async function setField(fn, val) {
   await setCursorType("default");
   const sel = `[data-fieldname="${fn}"]`;
   const r = await rectOf(sel);
-  // Park the cursor just under the field's BOTTOM-LEFT corner, not centered
-  // over the text baseline — the arrow's hotspot renders at exactly (x,y) (see
-  // the INIT overlay's `margin:-6px 0 0 -6px`, a near-zero offset), so a
-  // cursor positioned at the vertical text-center sits directly on top of the
-  // glyphs being typed and visually hides them. A real typing cursor isn't
-  // where the caret blinks anyway — it's wherever the mouse last was before
-  // the hands moved to the keyboard. Sitting just below the field reads as
-  // "about to type here" without ever occluding the value.
-  const belowY = (rr) => rr.y + rr.h + 14;
-  if (r) await glide(r.x + 14, belowY(r), 420);
+  // Park the cursor just outside the field's RIGHT border, vertically
+  // centered on it — not inside the text area at all, so the arrow's hotspot
+  // (which renders at exactly (x,y): see the INIT overlay's
+  // `margin:-6px 0 0 -6px`, a near-zero offset) never sits on top of the
+  // glyphs being typed. Two earlier positions were tried and both read
+  // wrong on camera: dead center (covers the text, the original defect) and
+  // parked below the field (reads as floating disconnected from the input,
+  // not like a hand that just finished typing there). Just past the right
+  // edge reads as "resting right where typing ended" without ever
+  // occluding the value — the natural place a cursor sits after filling a
+  // single-line field.
+  const restX = (rr) => rr.x + rr.w + 16;
+  const restY = (rr) => rr.cy;
+  if (r) await glide(restX(r), restY(r), 420);
 
   const ft = await fieldType(fn);
   const str = String(val);
@@ -776,12 +815,12 @@ async function setField(fn, val) {
       // field" defect. Re-measuring and re-drawing the ring (and the cursor,
       // so it visually tracks a field that's sliding under it) every
       // iteration keeps both pinned to the field's REAL current position. The
-      // cursor itself stays parked below the field (see belowY above) so it
-      // never covers the text actually being typed.
+      // cursor itself stays parked just past the field's right edge (see
+      // restX/restY above) so it never covers the text actually being typed.
       const liveR = await rectOf(sel);
       if (liveR) {
         await setFieldRing(liveR, 0.9);
-        await setCursorInFrame(liveR.x + 14, belowY(liveR));
+        await setCursorInFrame(restX(liveR), restY(liveR));
       }
       await cap();
       await dup(framesFor(perChar) - 1);
@@ -1018,7 +1057,7 @@ async function ensureGridRow(tableFieldname, keyFieldname) {
   await hoverDwell();
   await ripple(360);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s)?.click(), sel);
+  await clickVisible(sel);
   await hold(500); // let the new row open and the grid-form render
 }
 // Reorders a child-table row by glide+drop gesture (cosmetic) while doing the
@@ -1140,10 +1179,24 @@ async function saveForm() {
   // submitForm() already does for its modal button.
   const SEL = ".page-head .primary-action";
   const r0 = await rectOf(SEL);
-  if (r0) await glide(r0.cx, r0.cy, 460);
+  if (!r0) throw new Error("saveForm: Save button not found in page head (.page-head .primary-action)");
+  await setCursorType("pointer");
+  await glide(r0.cx, r0.cy, 460);
   await settleOnLive(SEL, r0);
   await hoverDwell();
   await ripple(340);
+  await setCursorType("default");
+  // CLICK THE REAL BUTTON — this used to ripple near the button purely for
+  // show, then call cur_frm.save() via fEval completely independently of
+  // that click, meaning no real click ever reached the page: a confirmed,
+  // real bug (not hypothetical), reported directly from watching a render —
+  // the Save ripple animates but the actual save is invisible/disconnected
+  // from it. Clicking the real `.page-head .primary-action` button fires
+  // Frappe's OWN click handler, which itself calls cur_frm.save() — the
+  // video now shows the actual cause of the save, not a cosmetic coincidence
+  // next to an unrelated background action.
+  const clickSave = () => clickVisible(SEL);
+  await clickSave();
   // IMPORTANT: on a validation failure (a missing mandatory field a custom
   // validate() checks for, NOT necessarily one `reqd: 1` in the schema --
   // confirmed on Sales Order's validate_delivery_date(), which throws even
@@ -1152,48 +1205,72 @@ async function saveForm() {
   // and the save() call just hangs forever waiting for a user to fix the
   // field and retry -- verified directly: the save() promise was still
   // pending 8+ seconds after a confirmed-open ".modal.show" dialog appeared.
-  // A bare fEval() with its default 15s timeout surfaces this as a generic
-  // "in-page timeout" with zero indication a dialog is sitting there asking
-  // for a field you forgot. Use a SHORT timeout here specifically so a
-  // real validation dialog is caught and reported clearly, not silently
-  // eaten by a 15s wait that looks identical to any other kind of hang.
+  // Poll for either outcome (cur_frm clean, or a validation dialog open)
+  // instead of awaiting a promise directly — clicking the real button means
+  // there is no promise reference to await in the first place, and this
+  // poll is also immune to the hang the old fEval-based approach needed a
+  // short timeout to detect.
+  let dialogText = null;
   try {
-    await fEval("async () => { await cur_frm.save(); return cur_frm.doc.docstatus; }", null, 6000);
-  } catch (e) {
-    const dialogText = await F().evaluate(() => {
+    await F().waitForFunction(() => {
+      if (window.cur_frm && !cur_frm.is_dirty() && !cur_frm.is_new()) return true;
+      return !!document.querySelector(".modal.show");
+    }, null, { timeout: 15000 });
+    dialogText = await F().evaluate(() => {
       const modal = document.querySelector(".modal.show");
       if (!modal) return null;
       const title = modal.querySelector(".modal-title")?.textContent?.trim();
       const body = modal.querySelector(".modal-body")?.textContent?.trim().slice(0, 300);
       return [title, body].filter(Boolean).join(": ");
     }).catch(() => null);
-    if (dialogText) {
-      throw new Error(
-        `saveForm: cur_frm.save() never resolved because a validation dialog is open — "${dialogText}". ` +
-        `This usually means a field a custom validate() requires wasn't set (schema's reqd:1 doesn't always ` +
-        `cover this — see get-schema.py's documented limitations). Set that field in the storyboard and retry.`
-      );
-    }
-    throw e; // genuinely unknown failure — don't swallow it as a dialog that wasn't there
+  } catch (e) {
+    throw new Error(`saveForm: clicked Save but the form never settled and no dialog appeared either — ${e.message}`);
+  }
+  if (dialogText) {
+    throw new Error(
+      `saveForm: clicking Save opened a validation dialog instead of saving — "${dialogText}". ` +
+      `This usually means a field a custom validate() requires wasn't set (schema's reqd:1 doesn't always ` +
+      `cover this — see get-schema.py's documented limitations). Set that field in the storyboard and retry.`
+    );
   }
   try {
-    await F().waitForFunction(() => window.cur_frm && !cur_frm.is_dirty(), null, { timeout: 12000 });
+    await F().waitForFunction(() => window.cur_frm && !cur_frm.is_dirty(), null, { timeout: 2000 });
   } catch (e) {
     // Observed occasionally (not reliably reproducible in isolation): saving
     // right after closing an open child-table grid row can leave is_dirty()
-    // stuck true even though cur_frm.save() itself resolved without error. One
-    // retry of cur_frm.save() has always cleared it in testing -- cheaper than
-    // failing the whole render over a transient stuck flag, and a real user
-    // hitting Save twice is unremarkable on camera. If you call saveForm()
-    // right after a grid-row edit, close the row first (row.toggle_view(false))
-    // -- a real user always does, and it removes most of what triggers this.
-    await fEval("async () => { await cur_frm.save(); return cur_frm.doc.docstatus; }");
+    // stuck true even though the save itself went through without error. One
+    // retry — a real click on the SAME real button, same as a real user
+    // hitting Save twice — has always cleared it in testing. If you call
+    // saveForm() right after a grid-row edit, close the row first
+    // (row.toggle_view(false)) -- a real user always does, and it removes
+    // most of what triggers this.
+    await clickSave();
     await F().waitForFunction(() => window.cur_frm && !cur_frm.is_dirty(), null, { timeout: 15000 });
   }
   await hold(900);
 }
 async function submitForm() {
-  await F().evaluate(() => { cur_frm.savesubmit(); });
+  // CLICK THE REAL "Submit" BUTTON — this used to call cur_frm.savesubmit()
+  // directly via fEval with NO click on the page at all, then only click the
+  // confirm MODAL's own "Yes" button once it appeared. A real, confirmed bug
+  // (not hypothetical), reported directly from watching a render: the video
+  // never showed the actual Submit button being clicked — a confirm dialog
+  // just appeared on screen with no visible cause. cur_frm.savesubmit()
+  // itself still can't be awaited directly (its promise hangs forever on the
+  // confirm dialog — see submitForm's long-standing own history on this),
+  // but clicking the REAL button and then waiting for the resulting modal
+  // sidesteps that without ever needing to call savesubmit() via fEval at
+  // all — Frappe's own click handler on that button is what calls it.
+  const SUBMIT_SEL = ".page-head .primary-action";
+  const r0 = await rectOf(SUBMIT_SEL);
+  if (!r0) throw new Error("submitForm: Submit button not found in page head (.page-head .primary-action)");
+  await setCursorType("pointer");
+  await glide(r0.cx, r0.cy, 460);
+  await settleOnLive(SUBMIT_SEL, r0);
+  await hoverDwell();
+  await ripple(340);
+  await setCursorType("default");
+  await clickVisible(SUBMIT_SEL);
   const BTN = ".modal.show .btn-modal-primary, .modal.show .modal-footer .btn-primary";
   await F().waitForFunction((s) => document.querySelector(s), BTN, { timeout: 12000 });
   await sleep(300);
@@ -1206,7 +1283,7 @@ async function submitForm() {
     await ripple(340);
     await setCursorType("default");
   }
-  await F().evaluate((s) => document.querySelector(s).click(), BTN);
+  await clickVisible(BTN);
   await F().waitForFunction(() => window.cur_frm && cur_frm.doc && cur_frm.doc.docstatus === 1, null, { timeout: 25000 });
   await hold(900);
 }
@@ -1269,7 +1346,7 @@ async function interceptFrappeModals({ timeoutMs = 1500, captionIt = true } = {}
     await hoverDwell();
     await ripple(360);
     await setCursorType("default");
-    await F().evaluate((s) => document.querySelector(s)?.click(), clickSel);
+    await clickVisible(clickSel);
   }
   await hold(500);
   return true;
@@ -1374,7 +1451,7 @@ async function openPrintView() {
   await hoverDwell();
   await ripple(360);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s).click(), ICON_SEL);
+  await clickVisible(ICON_SEL);
   await F().waitForFunction(() => location.pathname.includes("/print/"), null, { timeout: 15000 });
   await F().waitForFunction(() => document.querySelector(".print-preview, .print-format"), null, { timeout: 15000 }).catch(() => {});
   await hold(500);
@@ -1444,7 +1521,7 @@ async function openSearch() {
     await hoverDwell();
     await ripple(320);
     await setCursorType("default");
-    await F().evaluate((s) => document.querySelector(s)?.click(), TRIGGER);
+    await clickVisible(TRIGGER);
   } else {
     // Ctrl/Cmd+K also opens it — used as a fallback when the icon isn't
     // present in the current navbar layout (e.g. narrower breakpoints).
@@ -1504,6 +1581,83 @@ async function searchAndOpenDoctype(dt) {
   await F().waitForFunction(() => document.querySelector(".list-row"), null, { timeout: 20000 }).catch(() => {});
   await hold(500);
 }
+// Clicks a linked-document entry in a submitted document's own DASHBOARD —
+// the "Connections" tab's `.document-link` widgets (each showing a doctype
+// name and a badge count of how many such documents link back to this one,
+// e.g. "Loan Repayment Schedule  1" on a Loan Disbursement) — verified
+// directly against a live site. This is the REAL, generic way Frappe lets a
+// user navigate from a document to things created FROM it, and it is
+// GENUINELY better than search+filter for this: clicking the badge link
+// navigates straight to the linked list ALREADY filtered by the correct
+// relationship (confirmed: clicking "Loan Repayment Schedule" on a Loan
+// Disbursement's dashboard lands on
+// `/desk/.../loan-repayment-schedule/view/list?loan_disbursement=<name>` —
+// the filter is set correctly and automatically, nothing to type or clear).
+// Prefer this over `searchAndOpenDoctype` + manual filtering whenever the
+// doctype you're navigating TO is one the CURRENT document's own dashboard
+// already links to — it's both more realistic (a user who just submitted a
+// Loan Disbursement looks at ITS dashboard next, not the global search) and
+// more robust (no stray-filter hazard — see `clearListFilters()`'s own
+// comment on that class of bug). Not every doctype has a dashboard, and not
+// every navigation should go through one — use `searchAndOpenDoctype`/
+// `searchAndCreateNew` for anything the current document doesn't actually
+// link to.
+async function clickDashboardLink(doctypeLabel) {
+  const onConnections = await F().evaluate(() =>
+    !!document.querySelector('.form-tabs .nav-link.active')?.textContent?.trim().match(/connections/i)
+  ).catch(() => false);
+  if (!onConnections) {
+    const hasConnTab = await F().evaluate(() =>
+      [...document.querySelectorAll(".form-tabs .nav-link")].some((t) => /connections/i.test(t.textContent))
+    ).catch(() => false);
+    if (hasConnTab) await clickTab("Connections");
+  }
+  const sel = `.document-link[data-doctype="${doctypeLabel.replace(/"/g, '\\"')}"] .badge-link`;
+  const r = await rectOf(sel);
+  if (!r) throw new Error(`clickDashboardLink: no dashboard link for "${doctypeLabel}" on this document (does it actually link here?)`);
+  await setCursorType("pointer");
+  await glide(r.cx, r.cy, 440);
+  await settleOnLive(sel, r);
+  await hoverDwell();
+  await ripple(340);
+  await setCursorType("default");
+  await clickVisible(sel);
+  await F().waitForFunction(() => document.querySelector(".list-row, .form-layout"), null, { timeout: 20000 }).catch(() => {});
+  await hold(500);
+}
+// Clicks a list view's own primary "+ Add <Doctype>" button in the page
+// head (`.page-head .primary-action`) — the real way a user creates a new
+// document FROM a list they're already looking at, as opposed to `newDoc()`
+// jumping straight to a `/new` URL. Caller must already be on the list view.
+// Use this (not a bare newDoc() URL jump) any time the storyboard has just
+// shown a list view and the next beat is creating from it — jumping past a
+// visible "+ Add" button via URL reads as the video skipping a step, not a
+// person using the app.
+async function clickListAddButton(dt) {
+  const ADD_SEL = ".page-head .primary-action";
+  // The list view's own page-head can still be mid-render right after
+  // arriving via search (the previous screen's toolbar swapping out for
+  // this doctype's) — wait for the real readiness signal instead of
+  // measuring immediately, same class of race `gotoApp`/`waitForm` already
+  // guard against elsewhere.
+  await F().waitForFunction((s) => {
+    const el = document.querySelector(s);
+    return el && el.getBoundingClientRect().width > 0;
+  }, ADD_SEL, { timeout: 15000 }).catch(() => {});
+  const r = await rectOf(ADD_SEL);
+  if (!r) throw new Error("clickListAddButton: no list-view Add button found for " + dt);
+  await setCursorType("pointer");
+  await glide(r.cx, r.cy, 420);
+  await settleOnLive(ADD_SEL, r);
+  await hoverDwell();
+  await ripple(340);
+  await setCursorType("default");
+  await clickVisible(ADD_SEL);
+  await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 });
+  await waitForm(dt);
+  await F().waitForLoadState("networkidle").catch(() => {});
+  await hold(300);
+}
 // Full "create a new document via the real search box's quick-create" flow —
 // types "new <doctype>" and picks the literal "New <Doctype>" result, exactly
 // the flow a real user follows instead of a bare /new URL. Falls back to the
@@ -1521,6 +1675,10 @@ async function searchAndCreateNew(dt) {
   }, "New " + dt).catch(() => false);
   if (hasCreateRow) {
     await selectSearchResult("New " + dt);
+    await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 });
+    await waitForm(dt);
+    await F().waitForLoadState("networkidle").catch(() => {});
+    await hold(300);
   } else {
     // fallback: close the dropdown, search the bare doctype name to its list,
     // then use the list view's own primary "+ Add" button — still the real
@@ -1531,21 +1689,17 @@ async function searchAndCreateNew(dt) {
     await F().waitForFunction(() => document.querySelectorAll(".awesomplete li").length > 0, null, { timeout: 8000 }).catch(() => {});
     await selectSearchResult(dt);
     await F().waitForFunction(() => document.querySelector(".list-row, .page-head"), null, { timeout: 20000 }).catch(() => {});
-    const ADD_SEL = ".page-head .primary-action";
-    const r = await rectOf(ADD_SEL);
-    if (!r) throw new Error("searchAndCreateNew: no quick-create row and no list-view Add button found for " + dt);
-    await setCursorType("pointer");
-    await glide(r.cx, r.cy, 420);
-    await hoverDwell();
-    await ripple(340);
-    await setCursorType("default");
-    await F().evaluate((s) => document.querySelector(s)?.click(), ADD_SEL);
+    await clickListAddButton(dt);
   }
-  await F().waitForFunction(() => window.frappe && frappe.boot, null, { timeout: 25000 });
-  await waitForm(dt);
-  await F().waitForLoadState("networkidle").catch(() => {});
-  await hold(300);
 }
+// IMPORTANT for anyone hand-writing run(): a flow's FIRST visit to a
+// doctype should land on its real list view (via searchAndOpenDoctype or
+// equivalent) and then call clickListAddButton(dt), NOT newDoc(dt) — a bare
+// newDoc() jump right after the list is already on screen skips the visible
+// "+ Add" button the viewer just saw, which reads as the video teleporting
+// past a step. Reserve newDoc()'s direct /new URL jump for when there's
+// genuinely no list on screen to click an Add button from (e.g. the very
+// first navigation of a run, before any list has been shown).
 async function backToListView() {
   const SEL = "nav.es-breadcrumbs a.es-breadcrumbs__item:first-child";
   const r = await rectOf(SEL);
@@ -1556,7 +1710,7 @@ async function backToListView() {
   await hoverDwell();
   await ripple(340);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s)?.click(), SEL);
+  await clickVisible(SEL);
   await F().waitForFunction(() => document.querySelector(".list-row"), null, { timeout: 20000 }).catch(() => {});
   await hold(500);
 }
@@ -1582,7 +1736,7 @@ async function switchListView(viewLabel) {
   await hoverDwell();
   await ripple(340);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s)?.click(), TRIGGER);
+  await clickVisible(TRIGGER);
   await hold(400);
   const findItem = () => F().evaluate((needle) => {
     const menus = [...document.querySelectorAll(".es-menu")].filter((m) => {
@@ -1628,7 +1782,7 @@ async function toggleListFilter() {
   await hoverDwell();
   await ripple(340);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s)?.click(), SEL);
+  await clickVisible(SEL);
   await F().waitForFunction(() => document.querySelector(".filter-popover.popover"), null, { timeout: 8000 }).catch(() => {});
   await hold(400);
 }
@@ -1661,7 +1815,7 @@ async function clearListFilters() {
     await ripple(320);
     await setCursorType("default");
   }
-  await F().evaluate((s) => document.querySelector(s)?.click(), SEL);
+  await clickVisible(SEL);
   await hold(500);
 }
 
@@ -1675,7 +1829,7 @@ async function clickCustomButton(label) {
   await hoverDwell();
   await ripple(380);
   await setCursorType("default");
-  await F().evaluate((s) => document.querySelector(s).click(), sel);
+  await clickVisible(sel);
 }
 
 // IMPORTANT, verified directly against a live site's rendered DOM (not just
@@ -1701,7 +1855,7 @@ async function clickGroupItem(group, label) {
   await settleOnLive(gsel, g);
   await hoverDwell();
   await ripple(380);
-  await F().evaluate((s) => document.querySelector(s).click(), gsel); // open the menu
+  await clickVisible(gsel); // open the menu
   await hold(500); // dwell on the open menu (replaces a dead sleep+hold stack)
   // Find the open, visible .es-menu panel's row matching `label` by text —
   // there can be multiple .es-menu nodes in the DOM (other closed groups'

@@ -565,6 +565,69 @@ doesn't exist.
   flow that already created a Loan/Loan Disbursement earlier in the same storyboard.
   `clickListRow()`'s own "no list row" error now checks for `.filter-x-button` and names this
   exact possibility in its message when relevant, rather than reading like a bare selector bug.
+- **Prefer `clickDashboardLink(doctypeLabel)` over `searchAndOpenDoctype` + manual filtering for
+  navigating FROM a document to something it already links to.** Every Frappe doctype dashboard
+  (the "Connections" tab's `.document-link` widgets, each showing a linked doctype and a badge
+  count — e.g. "Loan Repayment Schedule  1" on a Loan Disbursement) is a real, generic navigation
+  surface: clicking a badge link navigates straight to the linked list ALREADY filtered correctly
+  by the relationship — confirmed live: clicking "Loan Repayment Schedule" on a Loan Disbursement
+  lands on `.../loan-repayment-schedule/view/list?loan_disbursement=<name>`, no typing or
+  clearing a filter needed. This is both more realistic (a user who just submitted a Loan
+  Disbursement looks at ITS dashboard next, not the global search) and sidesteps the
+  stray-filter hazard `clearListFilters()` exists for entirely. Not every doctype has a
+  dashboard and not every navigation should go through one — only use it for a doctype the
+  CURRENT document's own dashboard actually links to; reach for `searchAndOpenDoctype`/
+  `searchAndCreateNew` for anything else. `clickDashboardLink` handles switching to the
+  Connections tab itself if it isn't already active.
+- **`newDoc()`'s step handler used to skip the real "+ Add <Doctype>" button after landing on a
+  list — a real, confirmed bug caught only by watching a render.** The automatic opening beat
+  (Home → search → land on the doctype's list, documented above) correctly showed the list with
+  its own "+ Add" button on screen, but then jumped straight to `/new` via a bare URL instead of
+  clicking the button the viewer just saw — reads as the video silently skipping a step, not a
+  person using the app. Fixed with a new `clickListAddButton(dt)` primitive (clicks the real
+  `.page-head .primary-action` button) — the FIRST `newDoc()` call for a doctype in a run now
+  uses it; a SECOND `newDoc()` call for an already-visited doctype still uses the direct URL
+  jump, correctly, since by then the previous step has usually left off somewhere that isn't a
+  list view at all (there's no "+ Add" button on screen to click).
+- **`saveForm()`/`submitForm()` used to fake the click entirely — a real, confirmed bug, not a
+  cosmetic nitpick.** Both functions glided to and rippled near the real Save/Submit button for
+  show, but the ACTUAL action was a separate, invisible `fEval("cur_frm.save()")` /
+  `cur_frm.savesubmit()` call with no real click behind it at all — the ripple and the save/
+  submit were two disconnected things that happened to be near each other on screen. On camera
+  this reads as the confirm dialog or "Saved" toast appearing for no visible reason, since the
+  thing that actually caused it was never clicked. Fixed: both now call `clickVisible()` on the
+  real `.page-head .primary-action` button and let FRAPPE'S OWN click handler fire
+  `cur_frm.save()`/`savesubmit()` — no `fEval("cur_frm.save()"/...)` call anywhere in either
+  function anymore. `saveForm()` detects a validation-dialog failure by polling for either "form
+  clean" or "a modal appeared" (there's no promise reference to await now that the real click
+  triggers it, so the old short-timeout-then-catch pattern isn't needed either). **A doctype's
+  single "+Add"/primary-action button is literally "Save" on an unsaved doc and only becomes
+  "Submit" after the first successful save** — always call `saveForm()` before `submitForm()`
+  as two separate steps for a submittable doctype; calling `submitForm()` directly on a NEW,
+  never-saved doc just clicks "Save" (correctly — that's what the button says at that point) and
+  then times out waiting for a submit-confirm modal that was never going to appear.
+- **`rectOf()`/every click primitive could silently target a HIDDEN duplicate of the real
+  element — a real, confirmed bug found while fixing the above.** `document.querySelector(sel)`
+  always returns the FIRST match in DOCUMENT ORDER, regardless of visibility. Confirmed live:
+  right after a search-driven list navigation, TWO `.page-head .primary-action` buttons existed
+  simultaneously — a hidden leftover from the previous screen's toolbar (`class="...
+  primary-action hide"`) and the real, visible "Add Loan" button — and the hidden one happened
+  to come first in the DOM, so `rectOf` (correctly) reported no visible button at all even
+  though one was plainly on screen. Fixed generically: `rectOf()` now scans ALL matches for
+  `sel` and returns the first one that's actually visible (non-zero `getBoundingClientRect()`),
+  not just the first match found; a new shared `clickVisible(sel)` helper does the same scan
+  before clicking, and EVERY raw `document.querySelector(s)?.click()` call site in the harness
+  (15 of them) now goes through it instead of a bare querySelector — any of them could have hit
+  the identical hazard, not just the one that happened to be caught.
+- **The typing-cursor's rest position was moved again — a second user-reported regression, not
+  a fresh discovery.** Parked just below the field's bottom-left (the first fix, to stop it
+  covering the typed text) read as "floating, disconnected from the input" on camera instead of
+  looking like a hand that just finished typing there. Moved to just past the field's RIGHT edge,
+  vertically centered on it — still never overlaps the text (the arrow's hotspot renders at
+  almost exactly its own x,y), but reads as "resting right where typing ended," the natural
+  place a cursor sits after filling a single-line field. If this needs to move again, treat it
+  as settled only once confirmed by an actual rendered frame, not reasoning about it in the
+  abstract — two different "obviously fine" positions have each turned out wrong on screen.
 - **`clickGroupItem(group, label)` drives a grouped button (e.g. the `Create`/`Status` dropdown
   on a submitted document's page-head, or any `frm.add_custom_button(label, fn, group)`
   grouping) — but its item-matching had to be fixed after LIVE-DOM verification exposed a real
@@ -716,6 +779,25 @@ doesn't exist.
   on `frappe.boot` alone — it is a necessary but nowhere-near-sufficient condition.
 
 ### Frappe specifics
+- **The doctype Dashboard (Connections tab) is a generic, built-in navigation surface worth
+  understanding, not a Loan-specific or Sales-Order-specific thing.** Every Frappe doctype can
+  declare, in its controller's `get_dashboard_data()` (Python) or implicitly via its linked
+  doctypes, a set of OTHER doctypes that link back to it. The desk renders these on the
+  "Connections" tab as `.document-link` widgets — a doctype name plus a badge showing how many
+  such documents exist, e.g. "Loan Repayment Schedule  1" on a Loan Disbursement, or "Sales
+  Invoice  3" on a Sales Order. Clicking a badge (`.badge-link` inside `.document-link-badge`)
+  navigates to that doctype's list, PRE-FILTERED by the correct relationship via URL query
+  params — Frappe builds that filter itself from the actual link field, so it's always correct
+  and never needs typing or clearing. This skill's `clickDashboardLink(doctypeLabel)` primitive
+  drives exactly this. Use it (not `searchAndOpenDoctype` + manual filtering) whenever the
+  storyboard is moving from a document to something that document's own dashboard already
+  shows a link for — it's both more realistic (that's how a real user actually finds related
+  records) and avoids the stray-filter hazard documented under `clearListFilters()`. It is NOT
+  the right tool for every navigation — most doctype switches in a flow (e.g. Lead → Opportunity
+  in a CRM flow where Opportunity doesn't trivially show up on Lead's own dashboard in a useful
+  way) are still better served by `searchAndCreateNew`/`searchAndOpenDoctype`. Check what a
+  document's dashboard actually shows (open it once, click Connections) before assuming a link
+  exists — `clickDashboardLink` throws a clear error naming the doctype if it doesn't find one.
 - **Checkboxes:** `cur_frm.set_value(fieldname, 1)` — a native `input.click()` does NOT
   register with Frappe. The control re-renders checked, so the viewer sees it toggle.
 - **Tabs:** `clickTab(label, anchor)` glides to the nav-link, ripples, AND clicks it itself —
