@@ -1290,7 +1290,21 @@ async function rectOfListRow(index) {
 }
 async function clickListRow(index = 0) {
   const r = await rectOfListRow(index);
-  if (!r) throw new Error("no list row at index " + index);
+  if (!r) {
+    // A real, confirmed cause for index 0 specifically: Frappe list views
+    // persist the LAST-USED standard filter values per doctype per user
+    // across the whole session (frappe.get_user_settings) — a leftover
+    // filter from browsing a DIFFERENT but related doctype earlier in the
+    // same run can silently zero out this list's rows. Surface that
+    // possibility directly in the error instead of a bare "no row" that
+    // reads like a selector bug — call clearListFilters() and retry if this
+    // is what happened.
+    const hasFilterX = await F().evaluate(() => !!document.querySelector(".filter-x-button")).catch(() => false);
+    const hint = hasFilterX
+      ? " A stray standard filter left over from an earlier doctype this run may be hiding all rows — try clearListFilters() first."
+      : "";
+    throw new Error("no list row at index " + index + hint);
+  }
   await setCursorType("pointer");
   await glide(r.cx, r.cy, 500);
   // the list can re-sort/re-render rows (e.g. a background refresh) during
@@ -1617,6 +1631,38 @@ async function toggleListFilter() {
   await F().evaluate((s) => document.querySelector(s)?.click(), SEL);
   await F().waitForFunction(() => document.querySelector(".filter-popover.popover"), null, { timeout: 8000 }).catch(() => {});
   await hold(400);
+}
+
+// Clears every standard-filter field on a list view via its real "clear
+// filters" (X) button — verified directly against a live site:
+// `.filter-x-button` next to the Filter control. Frappe list views persist
+// the LAST-USED standard filter values per doctype per user across sessions
+// (`frappe.get_user_settings`/`view_user_settings` in list_view.js) — a real,
+// documented behavior, not a harness bug, but a real hazard for this
+// skill's reproducibility goal: confirmed directly on a live site, a
+// standard filter left over from browsing a DIFFERENT but related doctype
+// earlier in the same browser session (e.g. "Loan Disbursement" left in a
+// "Loan Repayment Schedule" list's own `loan_disbursement` filter field) can
+// silently zero out a list's rows, making `clickListRow(0)` throw "no list
+// row at index 0" for a reason that has nothing to do with the row-open
+// logic itself — the list is just filtered to nothing. Call this before
+// relying on a list's default (unfiltered, newest-first) row order whenever
+// the same browser session/user may have touched a related doctype earlier
+// in the run.
+async function clearListFilters() {
+  const SEL = ".filter-x-button";
+  const has = await F().evaluate((s) => !!document.querySelector(s), SEL).catch(() => false);
+  if (!has) return; // nothing to clear
+  const r = await rectOf(SEL);
+  if (r) {
+    await setCursorType("pointer");
+    await glide(r.cx, r.cy, 380);
+    await hoverDwell();
+    await ripple(320);
+    await setCursorType("default");
+  }
+  await F().evaluate((s) => document.querySelector(s)?.click(), SEL);
+  await hold(500);
 }
 
 async function clickCustomButton(label) {

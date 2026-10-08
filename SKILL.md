@@ -550,6 +550,21 @@ doesn't exist.
   `.filter-popover.popover .filter-edit-area` — the actual filter-field/operator/value pick
   inside it is doctype-specific, so this primitive only gets the popover on screen; drive the
   fields inside it the same way any other control is driven.
+- **`clearListFilters()`** — clears every standard-filter field on a list view via its real
+  "clear filters" (X) button, `.filter-x-button` (verified live, next to the Filter control).
+  **Exists because of a real, confirmed hazard**: Frappe list views persist the LAST-USED
+  standard filter values per doctype per user across the WHOLE SESSION
+  (`frappe.get_user_settings`/`view_user_settings` in `list_view.js`) — not a harness bug, real
+  documented Frappe behavior. Confirmed directly while recording a Loan demo: a `loan_disbursement`
+  standard filter left over on the "Loan Repayment Schedule" list from browsing Loan Disbursement
+  earlier in the SAME run silently zeroed out the list's rows, and `clickListRow(0)` then threw
+  "no list row at index 0" for a reason that had nothing to do with the row-open logic — the
+  list was just filtered to nothing. **Call `clearListFilters()` before relying on a list's
+  default (unfiltered, newest-first) row order whenever the same run has touched a related
+  doctype earlier** — e.g. right after `searchAndOpenDoctype("Loan Repayment Schedule")` in a
+  flow that already created a Loan/Loan Disbursement earlier in the same storyboard.
+  `clickListRow()`'s own "no list row" error now checks for `.filter-x-button` and names this
+  exact possibility in its message when relevant, rather than reading like a bare selector bug.
 - **`clickGroupItem(group, label)` drives a grouped button (e.g. the `Create`/`Status` dropdown
   on a submitted document's page-head, or any `frm.add_custom_button(label, fn, group)`
   grouping) — but its item-matching had to be fixed after LIVE-DOM verification exposed a real
