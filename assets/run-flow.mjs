@@ -1632,7 +1632,15 @@ async function clickDashboardLink(doctypeLabel) {
     const hasConnTab = await F().evaluate(() =>
       [...document.querySelectorAll(".form-tabs .nav-link")].some((t) => /connections/i.test(t.textContent))
     ).catch(() => false);
-    if (hasConnTab) await clickTab("Connections");
+    if (hasConnTab) {
+      await clickTab("Connections");
+      // The dashboard's .document-link widgets are rendered lazily (an
+      // async render pass the first time the Connections pane becomes
+      // visible, not present in the DOM at all until then) — a bare
+      // clickTab() alone is not a readiness signal for THEM specifically.
+      await F().waitForFunction((sel) => document.querySelector(sel), ".document-link", { timeout: 8000 }).catch(() => {});
+      await hold(300);
+    }
   }
   const sel = `.document-link[data-doctype="${doctypeLabel.replace(/"/g, '\\"')}"] .badge-link`;
   const r = await rectOf(sel);
