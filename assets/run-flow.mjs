@@ -1659,16 +1659,46 @@ async function clickDashboardLink(doctypeLabel) {
       await hold(300);
     }
   }
+  // A document reload (saveForm/submitForm's own cur_frm.reload_doc, or the
+  // SPA not doing a real page navigation between a save and a submit) can
+  // leave the dashboard rendered TWICE — confirmed live: a document with
+  // ONE real "Loan Repayment Schedule" dashboard link on a cold page load
+  // showed TWO after this harness's own save-then-submit sequence, both
+  // matching the same selector, with the FIRST being the old/stale one.
+  // frappe.ui.form.Dashboard guards its OWN render with a `data_rendered`
+  // flag precisely to prevent this, but that guard lives on the Dashboard
+  // JS object instance — if a reload constructs a NEW Dashboard instance
+  // without disposing the old one's DOM, the guard does nothing to the
+  // leftover markup already in the page. Pick the LAST match, not the
+  // first: Frappe always APPENDS the current render, so the most recent
+  // (and only genuinely live) one is the last node in document order,
+  // never the first — this is the mirror-image fix of rectOf's own
+  // "duplicate hidden leftover" hazard (there it's about visibility, here
+  // it's about staleness, and the first match is the wrong one in both
+  // cases for the same underlying reason: Frappe's dashboard didn't clean up
+  // after itself across a reload).
   const sel = `.document-link[data-doctype="${doctypeLabel.replace(/"/g, '\\"')}"] .badge-link`;
-  const r = await rectOf(sel);
+  const r = await F().evaluate((s) => {
+    const matches = [...document.querySelectorAll(s)].filter((el) => {
+      const rect = el.getBoundingClientRect();
+      return rect.width || rect.height;
+    });
+    const el = matches[matches.length - 1];
+    if (!el) return null;
+    const rect = el.getBoundingClientRect();
+    el.setAttribute("data-demo-dashboard-pick", "1");
+    return { x: rect.left, y: rect.top, w: rect.width, h: rect.height, cx: rect.left + rect.width / 2, cy: rect.top + rect.height / 2 };
+  }, sel).catch(() => null);
   if (!r) throw new Error(`clickDashboardLink: no dashboard link for "${doctypeLabel}" on this document (does it actually link here?)`);
   await setCursorType("pointer");
   await glide(r.cx, r.cy, 440);
-  await settleOnLive(sel, r);
   await hoverDwell();
   await ripple(340);
   await setCursorType("default");
-  await clickVisible(sel);
+  // Click the exact tagged element from above, not a fresh sel lookup — a
+  // bare clickVisible(sel) would re-resolve to the FIRST visible match again
+  // (the stale one), exactly the hazard this whole fix exists to avoid.
+  await F().evaluate(() => document.querySelector('[data-demo-dashboard-pick="1"]')?.click());
   await F().waitForFunction(() => document.querySelector(".list-row, .form-layout"), null, { timeout: 20000 }).catch(() => {});
   await hold(500);
 }

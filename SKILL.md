@@ -579,6 +579,19 @@ doesn't exist.
   CURRENT document's own dashboard actually links to; reach for `searchAndOpenDoctype`/
   `searchAndCreateNew` for anything else. `clickDashboardLink` handles switching to the
   Connections tab itself if it isn't already active.
+  **A reload between a save and a submit can leave the dashboard rendered TWICE —
+  confirmed live, a real bug, not hypothetical.** A fresh page load showed exactly ONE
+  `.document-link[data-doctype="Loan Repayment Schedule"]`; after this harness's own
+  `saveForm()` → `submitForm()` sequence on the SAME document, the identical selector matched
+  TWO — both visible, the first one stale. `frappe.ui.form.Dashboard` guards its own render
+  with a `data_rendered` flag specifically to prevent this, but that flag lives on the JS
+  object instance; if a reload constructs a new `Dashboard` instance without disposing the old
+  one's DOM, the guard does nothing about markup already in the page. A naive "first visible
+  match" (the same fix `rectOf()` uses for the hidden-duplicate hazard) picks the WRONG one
+  here — Frappe always appends, so the current, live render is the LAST match, never the
+  first. `clickDashboardLink` resolves this itself (picks the last visible match, tags it, and
+  clicks that exact element rather than re-resolving the selector) — don't "fix" it back to a
+  first-match lookup; that's the regression this fix exists to prevent.
 - **`newDoc()`'s step handler used to skip the real "+ Add <Doctype>" button after landing on a
   list — a real, confirmed bug caught only by watching a render.** The automatic opening beat
   (Home → search → land on the doctype's list, documented above) correctly showed the list with
